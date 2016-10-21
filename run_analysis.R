@@ -1,115 +1,50 @@
-file <- "data.zip"
-url <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip"
-data_path <- "UCI HAR Dataset"
-result_folder <- "results"
-
-##Install required packacets  
-# looks if package is installed
-
-if(!is.element("plyr", installed.packages()[,1])){
-        print("Installing packages")
-        install.packages("plyr")
-}
-
 library(plyr)
 
-## Create data and folders   
-# verifies the data zip file has been downloaded
-if(!file.exists(file)){
-        
-        ##Downloads the data file
-        print("downloading Data")
-        download.file(url,file, mode = "wb")
-        
-}
+if(!file.exists("./quizeData")){dir.create("./quizeData")}
+url <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip"
+download.file(url ,destfile="./quizeData/quizeDataset.zip", method="curl")
 
-if(!file.exists(result_folder)){
-        print("Creating result folder")
-        dir.create(result_folder)
-} 
+unzip(zipfile="./quizeData/quizeDataset.zip", exdir="./quizeData")
 
-##reads a table from the zip data file and applies cols
-getTable <- function (filename,cols = NULL){
-        
-        print(paste("Getting table:", filename))
-        
-        f <- unz(file, paste(data_path,filename,sep="/"))
-        
-        data <- data.frame()
-        
-        if(is.null(cols)){
-                data <- read.table(f,sep="",stringsAsFactors=F)
-        } else {
-                data <- read.table(f,sep="",stringsAsFactors=F, col.names= cols)
-        }
-        
-        
-        data
-        
-}
+quizeDir <- file.path("./quizeData" , "UCI HAR Dataset")
+files <- list.files(quizeDir, recursive=TRUE)
 
-##Reads and creates a complete data set
-getData <- function(type, features){
-        
-        print(paste("Getting data", type))
-        
-        subject_data <- getTable(paste(type,"/","subject_",type,".txt",sep=""),"id")
-        y_data <- getTable(paste(type,"/","y_",type,".txt",sep=""),"activity")    
-        x_data <- getTable(paste(type,"/","X_",type,".txt",sep=""),features$V2) 
-        
-        return (cbind(subject_data,y_data,x_data)) 
-}
+activityTrainData <- read.table(file.path(quizeDir, "train", "y_train.txt"), header = FALSE)
+activityTestData  <- read.table(file.path(quizeDir, "test" , "y_test.txt" ), header = FALSE)
 
-##saves the data into the result folder
-saveResult <- function (data,name){
-        
-        print(paste("Saving data", name))
-        
-        file <- paste(result_folder, "/", name,".csv" ,sep="")
-        write.csv(data,file)
-}
+subjectTrainData <- read.table(file.path(quizeDir, "train", "subject_train.txt"), header = FALSE)
+subjectTestData  <- read.table(file.path(quizeDir, "test" , "subject_test.txt"), header = FALSE)
 
+featuresTrainData <- read.table(file.path(quizeDir, "train", "X_train.txt"), header = FALSE)
+featuresTestData  <- read.table(file.path(quizeDir, "test" , "X_test.txt" ), header = FALSE)
 
+subjectData <- rbind(subjectTrainData, subjectTestData)
+activityData <- rbind(activityTrainData, activityTestData)
+featuresData <- rbind(featuresTrainData, featuresTestData)
 
-##get common data tables
+names(subjectData) <- c("subject")
+names(activityData) <- c("activity")
+featuresDataNames <- read.table(file.path(quizeDir, "features.txt"), head = FALSE)
+names(featuresData) <- featuresDataNames$V2
 
-#features used for col names when creating train and test data sets
-features <- getTable("features.txt")
+combinedData <- cbind(subjectData, activityData)
+Data <- cbind(featuresData, combinedData)
 
-## Load the data sets
-train <- getData("train",features)
-test <- getData("test",features)
+featuresSubdataNames <- featuresDataNames$V2[grep("mean\\(\\)|std\\(\\)", featuresDataNames$V2)]
 
-## 1. Merges the training and the test sets to create one data set. < DONE
-# merge datasets
-data <- rbind(train, test)
+selectedNames <- c(as.character(featuresSubdataNames), "subject", "activity" )
+Data <-subset(Data, select = selectedNames)
 
-# rearrange the data using id
-data <- arrange(data, id)
+activityLabels <- read.table(file.path(quizeDir, "activity_labels.txt"), header = FALSE)
+Data$activity <- factor(Data$activity, labels = as.character(activityLabels$V2))
 
+names(Data)<-gsub("^t", "time", names(Data))
+names(Data)<-gsub("^f", "frequency", names(Data))
+names(Data)<-gsub("Acc", "Accelerometer", names(Data))
+names(Data)<-gsub("Gyro", "Gyroscope", names(Data))
+names(Data)<-gsub("Mag", "Magnitude", names(Data))
+names(Data)<-gsub("BodyBody", "Body", names(Data))
 
-
-## 3. Uses descriptive activity names to name the activities in the data set < DONE
-## 4. Appropriately labels the data set with descriptive activity names.  < DONE
-
-activity_labels <- getTable("activity_labels.txt")
-
-data$activity <- factor(data$activity, levels=activity_labels$V1, labels=activity_labels$V2)
-
-
-
-## 2. Extracts only the measurements on the mean and standard deviation for each measurement. 
-dataset1 <- data[,c(1,2,grep("std", colnames(data)), grep("mean", colnames(data)))]
-
-
-# save dataset1 into results folder
-saveResult(dataset1,"dataset1")
-
-## 5. Creates a second, independent tidy data set with the average of each variable for each activity and each subject. 
-dataset2 <- ddply(dataset1, .(id, activity), .fun=function(x){ colMeans(x[,-c(1:2)]) })
-
-# Adds "_mean" to colnames
-colnames(dataset2)[-c(1:2)] <- paste(colnames(dataset2)[-c(1:2)], "_mean", sep="")
-
-# Save tidy dataset2 into results folder
-saveResult(dataset2,"dataset2")
+SecondData <- aggregate(. ~subject + activity, Data, mean)
+SecondData <- SecondData[order(SecondData$subject, SecondData$activity),]
+write.table(SecondData, file = "tidydata.txt",row.name = FALSE)
