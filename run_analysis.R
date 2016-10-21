@@ -1,51 +1,115 @@
-library(reshape2)
+file <- "data.zip"
+url <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip"
+data_path <- "UCI HAR Dataset"
+result_folder <- "results"
 
-## read X, y and subject data for both train and test datasets
-xtrain <- read.table("UCI HAR Dataset/train/X_train.txt")
-xtest <- read.table("UCI HAR Dataset/test/X_test.txt")
-ytrain <- read.table("UCI HAR Dataset/train/y_train.txt")
-ytest <- read.table("UCI HAR Dataset/test/y_test.txt")
-subjecttrain <- read.table("UCI HAR Dataset/train/subject_train.txt")
-subjecttest <- read.table("UCI HAR Dataset/test/subject_test.txt")
+##Install required packacets  
+# looks if package is installed
 
-## merge X, y and subject data for both train and test datasets
-x <- rbind(xtrain, xtest)
-y <- rbind(ytrain, ytest)
-subject <- rbind(subjecttrain, subjecttest)
+if(!is.element("plyr", installed.packages()[,1])){
+        print("Installing packages")
+        install.packages("plyr")
+}
 
-## read in features descriptions
-features <- read.table("UCI HAR Dataset/features.txt")[,"V2"]
+library(plyr)
 
-## set descriptive names for all columns in merged X, y and subject data
-colnames(x) <- features
-colnames(y) <- "activity_id"
-colnames(subject) <- "subject"
+## Create data and folders   
+# verifies the data zip file has been downloaded
+if(!file.exists(file)){
+        
+        ##Downloads the data file
+        print("downloading Data")
+        download.file(url,file, mode = "wb")
+        
+}
 
-## select features containing measurements on the mean and standard deviation
-means <- grep("-mean\\(\\)", features, value=TRUE)
-stds <- grep("-std\\(\\)", features, value=TRUE)
-exfeatures <- c(means, stds)
-x2 <- x[, exfeatures]
+if(!file.exists(result_folder)){
+        print("Creating result folder")
+        dir.create(result_folder)
+} 
 
-## read in activity descriptions
-activities <- read.table("UCI HAR Dataset/activity_labels.txt")
-colnames(activities) <- c("activity_id", "activity")
+##reads a table from the zip data file and applies cols
+getTable <- function (filename,cols = NULL){
+        
+        print(paste("Getting table:", filename))
+        
+        f <- unz(file, paste(data_path,filename,sep="/"))
+        
+        data <- data.frame()
+        
+        if(is.null(cols)){
+                data <- read.table(f,sep="",stringsAsFactors=F)
+        } else {
+                data <- read.table(f,sep="",stringsAsFactors=F, col.names= cols)
+        }
+        
+        
+        data
+        
+}
 
-## join activity dataset with descriptive labels
-y2 <- merge(y, activities)
+##Reads and creates a complete data set
+getData <- function(type, features){
+        
+        print(paste("Getting data", type))
+        
+        subject_data <- getTable(paste(type,"/","subject_",type,".txt",sep=""),"id")
+        y_data <- getTable(paste(type,"/","y_",type,".txt",sep=""),"activity")    
+        x_data <- getTable(paste(type,"/","X_",type,".txt",sep=""),features$V2) 
+        
+        return (cbind(subject_data,y_data,x_data)) 
+}
 
-## join measurements dataset with activity labels
-data <- cbind(x2, y2["activity"])
+##saves the data into the result folder
+saveResult <- function (data,name){
+        
+        print(paste("Saving data", name))
+        
+        file <- paste(result_folder, "/", name,".csv" ,sep="")
+        write.csv(data,file)
+}
 
-## write first result data set to csv
-write.csv(data, "measurements_mean_std.txt")
 
-## join subject ids
-data2 <- cbind(data, subject)
 
-## summarize means per unique (activity, subject) pair 
-data2melt <- melt(data2, id=c("subject", "activity"))
-data3 <- dcast(data2melt, activity + subject ~ variable, mean)
+##get common data tables
 
-## write second result data set to csv
-write.csv(data3, "activity_subject_means.txt")
+#features used for col names when creating train and test data sets
+features <- getTable("features.txt")
+
+## Load the data sets
+train <- getData("train",features)
+test <- getData("test",features)
+
+## 1. Merges the training and the test sets to create one data set. < DONE
+# merge datasets
+data <- rbind(train, test)
+
+# rearrange the data using id
+data <- arrange(data, id)
+
+
+
+## 3. Uses descriptive activity names to name the activities in the data set < DONE
+## 4. Appropriately labels the data set with descriptive activity names.  < DONE
+
+activity_labels <- getTable("activity_labels.txt")
+
+data$activity <- factor(data$activity, levels=activity_labels$V1, labels=activity_labels$V2)
+
+
+
+## 2. Extracts only the measurements on the mean and standard deviation for each measurement. 
+dataset1 <- data[,c(1,2,grep("std", colnames(data)), grep("mean", colnames(data)))]
+
+
+# save dataset1 into results folder
+saveResult(dataset1,"dataset1")
+
+## 5. Creates a second, independent tidy data set with the average of each variable for each activity and each subject. 
+dataset2 <- ddply(dataset1, .(id, activity), .fun=function(x){ colMeans(x[,-c(1:2)]) })
+
+# Adds "_mean" to colnames
+colnames(dataset2)[-c(1:2)] <- paste(colnames(dataset2)[-c(1:2)], "_mean", sep="")
+
+# Save tidy dataset2 into results folder
+saveResult(dataset2,"dataset2")
